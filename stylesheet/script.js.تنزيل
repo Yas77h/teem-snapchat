@@ -1,0 +1,2511 @@
+HC.templates = {};
+Vue.options.delimiters = ['{[{', '}]}'];
+
+// ----------- @@homepage nav --------------------
+HC.templates.homepageNav = new Vue({
+  data() {
+    return {
+      categories: [],
+      sections: [],
+      articles: [],
+      showContactBtn: true,
+      expandMenu: false,
+      expandSectionMenu: false,
+      expandArticleMenu: false,
+      expandCatSectionMenu: false,
+      expandSubSectionMenu: false,
+      expandSubArticles: false,
+      isLoading: false,
+    };
+  },
+
+  components: {
+    PulseLoader: VueSpinner.PulseLoader,
+  },
+
+  created() {
+  },
+  
+  mounted() {
+    this.initialize(HC.SETTINGS.hcLocale);
+  },
+  beforeDestroy() {
+    window.removeEventListener('resize', this.checkIfMobile);
+  },
+  updated() {
+    this.checkIfMobile();
+  },
+
+  methods: {
+
+    async initialize(locale) {
+      this.isLoading = true;
+      await this.getArticles(locale);
+      await this.getCategories(locale);
+      await this.getSections(locale);
+      console.log('HC', HC)
+      HC.renderHeader();
+      window.addEventListener('resize', this.checkIfMobile);
+      this.checkIfMobile();
+
+      if (window.location.href.includes('articles')) {
+        setTimeout(() => {
+          this.presetNav()
+        }, 500);
+      }
+
+    },
+
+    // Fetch categories from API and cache data => render categories
+    async getCategories(locale) {
+      try {
+        const getCategories = await fetch(`/api/v2/help_center/${locale}/categories`);
+        const data = await getCategories.json();
+        const trimmedCategories = data.categories.map(category => (({id, name, html_url}) => ({id, name, html_url}))(category));
+        HC.CATEGORIES = trimmedCategories;
+      } catch (error) {
+        console.error('Error getCategories', error);
+        console.log(error)
+
+        // Send information about the error to Google Analytics	
+        gtag("event", "Zendesk API", {
+          "event_category": "Help Center Error",
+          "event_label": error,	
+        });
+      }
+      this.renderCategories(HC.CATEGORIES);
+    },
+
+    // Fetch sections from API and cache data => render sections
+    async getSections(locale) {
+      try {
+        const getSections = await this.paginatedFetch(`/api/v2/help_center/${locale}/sections`, 'sections');
+        const trimmedSections = await getSections.map(section => (({id, name, html_url, category_id, parent_section_id}) => ({id, name, html_url, category_id, parent_section_id}))(section))
+        HC.SECTIONS = trimmedSections;
+      } catch (error) {
+        console.error('Error getSections()', error);
+        // Send information about the error to Google Analytics	
+        gtag("event", "Zendesk API", {
+          "event_category": "Help Center Error",
+          "event_label": error,	
+        });
+      }
+
+      this.renderSections(HC.SECTIONS);
+    },
+
+    // Fetch articles from API and cache data => render articles
+    async getArticles(locale) {
+      try {
+        const getArticles = await this.paginatedFetch(`/api/v2/help_center/${locale}/articles`, 'articles');
+        const trimmedArticles = await getArticles.filter(item => item.draft == false).map(article => (({id, name, html_url, section_id, title}) => ({id, name, html_url, section_id, title}))(article))
+        HC.ARTICLES = trimmedArticles;
+      } catch (error) {
+        console.error('Error getArticles()', error);
+
+        // Send information about the error to Google Analytics	
+        gtag("event", "Zendesk API", {
+          "event_category": "Help Center Error",
+          "event_label": error,	
+        });
+      }
+
+    },
+
+    // hide the 'Hidden' category
+    removeHiddenCategories() {
+      this.categories?.forEach((cat, i) => {
+        if (cat?.id == HC.SETTINGS.hiddenCategoryId) {
+          this.categories.splice(i, 1);
+        }
+      });
+    },
+
+    isTouchDevice() {
+      return (('ontouchstart' in window) ||
+         (navigator.maxTouchPoints > 0) ||
+         (navigator.msMaxTouchPoints > 0));
+    },
+
+    // checks if on mobile device
+    checkIfMobile() {
+      var hasTouchScreen = this.isTouchDevice();
+
+      if (window.matchMedia('screen and (max-width: 768px)').matches) {
+        this.showContactBtn = false;
+      } else {
+        this.showContactBtn = true;
+      }
+
+      if (hasTouchScreen) {
+        if ((window.location.href.includes('articles') || window.location.href.includes('requests'))) {
+          document.querySelector('.homepage-nav-container') ? document.querySelector('.homepage-nav-container').style.display = 'none' : null;
+          document.querySelector('.homepage-nav') ? document.querySelector('.homepage-nav-container').style.display = 'none' : null;
+          document.querySelector('.homepage-nav-loader') ? document.querySelector('.homepage-nav-loader').style.display = 'none' : null;
+        }
+      } else {
+        document.querySelector('.homepage-nav-container') ? document.querySelector('.homepage-nav-container').style.display = 'block' : null;
+        document.querySelector('.homepage-nav') ? document.querySelector('.homepage-nav-container').style.display = 'block' : null;
+        document.querySelector('.homepage-nav-loader') ? document.querySelector('.homepage-nav-loader').style.display = 'block' : null;
+      }
+
+      if (document.querySelector(".search input[type='search']") && window.matchMedia('screen and (max-width: 280px)').matches) {
+        const placeholder = document.querySelector(".search input[type='search']").placeholder;
+        document.querySelector(".search input[type='search']").placeholder = placeholder.length >= 21 ? placeholder.slice(0, 21) + "..." : placeholder;
+      }
+    },
+
+    // If on an articles page, preset the navigation with appropriate active categories and sections
+    presetNav() {
+      const currentArticleID = this.getArticleID();
+      const foundArticle = HC.ARTICLES.find((article) => article.id === currentArticleID);
+      console.log(foundArticle);
+
+      console.log(this.categories)
+      const foundCategory = this.categories.find((category) => {
+        return category.sections.find((section) => {
+          if (foundArticle?.section_id) {
+            if (Number(section.id) == Number(foundArticle.section_id)) {
+              return section;
+            } else {
+              return section.subsections?.find((sub) => {
+                if (Number(sub.id) == Number(foundArticle.section_id)) {
+                  return sub;
+                } else {
+                  return sub.subsections.find(ssub => {
+                    if (Number(ssub.id) == Number(foundArticle.section_id)) {
+                      return ssub;
+                    }
+                  })
+                }
+              });
+            }
+          }
+        });
+      });
+
+      const foundSection = foundCategory?.sections.find((section) => section.id === foundArticle.section_id);
+
+      console.log(foundCategory)
+      console.log(foundSection)
+
+      if (foundSection) {
+        this.setActive(foundCategory);
+        this.setActiveSection(foundSection);
+      } else {
+        const foundSec = foundCategory?.sections.find(section => {
+          return section.subsections.find(sub => sub.id == foundArticle.section_id);
+        })
+        const foundSub = foundSec?.subsections.find(sub => sub.id == foundArticle.section_id)
+
+        this.setActive(foundCategory)
+        this.setActiveSection(foundSec)
+        this.setActiveSubsection(foundSub)
+      }
+    },
+
+    // Helper method to get the article ID
+    getArticleID() {
+      const path = window.location.pathname,
+        links = path.split('/'),
+        page = links[links.length - 1],
+        result = page.split('-')[0];
+      return parseInt(result, 10) || null;
+    },
+
+    // Move 'Using Snapchat' category to front of the category list
+    setUsingSnapchatCategoryToFront(categories) {
+      const snapCat = categories.find((cat) => cat.id === 5685832477716);
+      const snapCatIdx = categories.findIndex((cat) => cat.id === 5685832477716);
+      categories.splice(snapCatIdx, 1);
+      categories.unshift(snapCat);
+    },
+
+    // set active category when clicked
+    setActive(category = {}) {
+      if (category.active === false) {
+        this.categories.forEach((cat) => {
+          cat.active = false;
+          cat.showSections = false;
+        });
+        category.active = true;
+        this.expandMenu = true;
+        this.showSection(category);
+
+        gtag('event', 'select_item', {
+          'event_category': 'CUF Node Selections',
+         'event_label': category.name,
+         'value': 1
+        });
+
+        console.log(category);
+
+      } else {
+        category.active = false;
+        this.expandMenu = false;
+        this.showSection(category);
+      }
+    },
+
+    // Set active section when clicked
+    setActiveSection(section) {
+      const foundCat = this.categories.find((cat) => cat.id === section?.category_id);
+      if (section) section.active = true;
+      this.showArticles(section);
+    },
+
+    // Set active subsection when clicked
+    setActiveSubsection(section) {
+      const foundCat = this.categories.find((cat) => cat.id === section?.category_id);
+      if (section) {
+        section.active = true;
+        this.showSubsectionArticles(section);
+      } 
+    },
+
+    handleClick(category) {
+      this.setActive(category);
+    },
+
+    iconClass(category) {
+      return `icon-nav-${category.id}`;
+    },
+
+    // Show articles in subsections on click
+    showSubsectionArticles(subsection) {
+      subsection.showArticles = !subsection.showArticles;
+      console.log('open', subsection)
+      if (subsection.showArticles) {
+        this.expandSectionMenu = true;
+      } else {
+        this.expandSectionMenu = false;
+      }
+
+      if (subsection.subsections.length) {
+        console.log('SHOW SUB SUBSECTIONS')
+        subsection.showSubsections = !subsection.showSubsections;
+        console.log(subsection);
+        if (subsection.showSubsections) {
+          this.expandSubSectionMenu = true;
+        } else {
+          this.expandSubSectionMenu = false;
+        }
+      }
+    },
+    // Show articles in subsubsections on click
+    showSubsubsections(ssub) {
+      console.log(ssub)
+      ssub.showArticles = !ssub.showArticles;
+      this.expandSubArticles = !this.expandSubArticles;
+      // this.expandSubSectionMenu = !this.expandSubSectionMenu;
+      if (ssub.showArticles) {
+        this.expandSubSectionMenu = true;
+      } else {
+        this.expandSubSectionMenu = false;
+      }
+    },
+
+    // Show Section on click
+    showSection(category) {
+      category.showSections = !category.showSections;
+      if (category.showSections) {
+        this.expandCatSectionMenu = true;
+      } else {
+        this.expandCatSectionMenu = false;
+      }
+    },
+
+    // Show articles on click
+		showArticles(section) {
+			if (section) {
+        section.showSubsections = !section.showSubsections;
+			  section.showArticles = !section.showArticles;
+        if (section.showArticles) {
+          this.expandArticleMenu = true;
+        } else {
+          this.expandArticleMenu = false;
+        }
+        
+        gtag('event', 'select_item', {
+          item_list_id: "navigation_pane",
+          item_list_name: "Navigation Page",
+          items: [
+            {
+              item_id: section.id,
+              item_name: section.name,
+            }
+          ]
+        })
+      }
+		},
+
+    // Build article array for each Section object
+    renderArticles(articles) {
+      articles.forEach((article) => {
+        const inCategory = this.categories.find((category) => {
+          return category.sections.find((section) => {
+            if (section.id == article.section_id) {
+              return section;
+            } else {
+              return section.subsections.find((sub) => {
+                if (sub.id == article.section_id) {
+                  return sub;
+                }
+              });
+            }
+          });
+        });
+        if (inCategory) {
+          // console.log(article)
+          inCategory.sections.forEach((section) => {
+            if (section.id == article.section_id) {
+              return section.articles.push(article);
+            } else {
+              if (section.subsections.length) {
+                section.subsections.forEach((sub) => {
+                  if (sub.id === article.section_id) {
+                    sub.articles.push(article);
+                  } else {
+                    if (sub.subsections.length) {
+                      sub.subsections.forEach(subsec => {
+                        if (subsec.id === article.section_id) {
+                          subsec.articles.push(article)
+                        }
+                      })
+                    }
+                  }
+                });
+              }
+            }
+          });
+        } 
+
+        this.articles.push(article);
+      });
+      this.isLoading = false;
+    },
+
+    
+
+    // Build category objects for DOM
+    renderCategories(categories) {
+      categories.forEach((category) => {
+        const newCat = {
+          ...category,
+          sections: [],
+          showSections: false,
+          active: false,
+        };
+
+        this.categories.push(newCat);
+      });
+
+      this.setUsingSnapchatCategoryToFront(this.categories);
+      this.removeHiddenCategories();
+      this.isLoading = false;
+    },
+
+
+    // Build section objects to render onto DOM
+    renderSections(sections) {
+      let sectionsWithSubs = [];
+      sections.forEach((section) => {
+        const inCategory = this.categories.find((category) => {
+          return category.id === section.category_id && !section.parent_section_id;
+        });
+        const foundArticles = HC.ARTICLES.filter((article) => {
+          return Number(article.section_id) == Number(section.id);
+        });
+        const newSection = {
+          ...section,
+          subsections: [],
+          showSubsections: false,
+          articles: foundArticles,
+          showArticles: false,
+          active: false,
+        };
+        if (inCategory) {
+          inCategory.sections.push(newSection);
+        } else {
+          // if it has a parent section ==> it is a subsection
+          if (section.parent_section_id !== null) {
+            sectionsWithSubs.push(section);
+          }
+        }
+
+        this.sections.push(newSection);
+        
+      });
+
+
+
+
+      if (sectionsWithSubs.length) {
+        setTimeout(() => {
+          this.checkSubsections(sectionsWithSubs);
+          this.isLoading = false;
+        }, 500)
+      }
+
+      this.isLoading = false;
+
+    },
+
+    // Finds parent section for subsections
+    async checkSubsections(subsections) {
+      let tempList = subsections;
+      for (let i = tempList.length - 1; i >= 0; i--) {
+        const subsection = tempList[i];
+        const foundCategory = await this.categories.find((cat) => cat.id == subsection.category_id);
+        let parentSection = await foundCategory.sections.find((sec) => sec.id == subsection.parent_section_id);
+        
+        if (!parentSection) {
+          for(let j = 0; j < foundCategory.sections.length; j++) {
+            const sec = foundCategory.sections[j];
+            if(sec.subsections.length) {
+              const foundSub = await sec.subsections.find((sub) => {
+                return Number(sub.id) == Number(subsection.parent_section_id);
+              });
+              if (foundSub) {
+                parentSection = foundSub;
+                tempList.splice(i, 1);
+                // i++;
+              } 
+            }
+          }
+          const foundArticles = HC.ARTICLES.filter((article) => {
+            return Number(article.section_id) == Number(subsection.id);
+          });
+          
+          const newSubsection = {
+            ...subsection,
+            subsections: [],
+            showSubsections: false,
+            articles: foundArticles,
+            showArticles: false,
+            active: false,
+          };
+
+          if (!!parentSection) {
+            parentSection.subsections.push(newSubsection);
+            parentSection.subsections = parentSection.subsections.sort((a, b) => a.name.localeCompare(b.name));
+          }
+
+        } else {
+          const foundArticles = HC.ARTICLES.filter((article) => {
+            return article.section_id === subsection.id;
+          });
+
+          const newSubsection = {
+            ...subsection,
+            subsections: [],
+            showSubsections: false,
+            articles: foundArticles,
+            showArticles: false,
+            active: false,
+          };
+
+          parentSection.subsections.push(newSubsection);
+          parentSection.subsections = parentSection.subsections.sort((a, b) => a.name.localeCompare(b.name));
+          tempList.splice(i, 1);
+
+        }
+        subsections = tempList;
+      }
+
+      // if there are any subsections left without a parent, redo the search
+      if (subsections.length) {
+        for (let i = subsections.length - 1; i >= 0; i--) {
+          const subsection = subsections[i];
+          const foundCategory = await this.categories.find((cat) => cat.id == subsection.category_id);
+          let parentSection = await foundCategory.sections.find((sec) => sec.id == subsection.parent_section_id);
+          
+          if (!parentSection) {
+            for(let j = 0; j < foundCategory.sections.length; j++) {
+              const sec = foundCategory.sections[j];
+              if(sec.subsections.length) {
+                const foundSub = await sec.subsections.find((sub) => {
+                  return Number(sub.id) == Number(subsection.parent_section_id);
+                });
+                if (foundSub) {
+                  parentSection = foundSub;
+                  subsections.splice(i, 1);
+                  // i++;
+                }
+              }
+            }
+            
+            const foundArticles = HC.ARTICLES.filter((article) => {
+              return article.section_id === subsection.id;
+            });
+            
+            const newSubsection = {
+              ...subsection,
+              subsections: [],
+              showSubsections: false,
+              articles: foundArticles,
+              showArticles: false,
+              active: false,
+            };
+  
+            if (!!parentSection) {
+              parentSection.subsections.push(newSubsection);
+              parentSection.subsections = parentSection.subsections.sort((a, b) => a.name.localeCompare(b.name));
+            } else {
+              console.log('still no parent', subsection)
+            }
+          }
+        }
+      }
+      this.isLoading = false;
+    },
+
+    async paginatedFetch(url, key, page = 1, previousResponse = []) {
+      const response = await fetch(`${url}?per_page=100&page=${page}`);
+      try {
+        const responseJSON = await response.json();
+
+        const data = [...previousResponse, ...responseJSON[key]];
+        if (!!responseJSON.next_page) {
+          page++;
+          return this.paginatedFetch(url, key, page, data);
+        }
+        return data;
+      } catch (error) {
+        console.error(error)
+        console.log(`Error fetching ${key} API`);
+
+        gtag("event", "Zendesk API", {
+          "event_category": "Help Center Error",
+          "event_label": error,	
+          "value": await response.status
+        });
+      }
+    },
+
+  },
+});
+
+// ----------- @@contact us flow --------------------
+HC.templates.contactUsFlow = new Vue({
+  data() {
+    return {
+      CUF: {},
+      tags: [],
+      hasSelected: false,
+      hasLv2: false,
+      hasLv3: false,
+      hasLv4: false,
+      hasLv5: false,
+      secondQuestionArr: [],
+      thirdQuestionArr: [],
+      fourthQuestionArr: [],
+      fifthQuestionArr: [],
+      firstAnswer: {},
+      secondAnswer: {},
+      thirdAnswer: {},
+      fourthAnswer: {},
+      fifthAnswer: {},
+      isLoading: false,
+      hasLv1Blocking: false,
+      hasLv2Blocking: false,
+      hasLv3Blocking: false,
+      noNeedMoreHelpLv1: false,
+      noNeedMoreHelpLv2: false,
+      noNeedMoreHelpLv3: false,
+      stopTheFlowAfterBlocking: false,
+      isHiddenForm: false,
+      formOpen: false,
+      selectedAnswers: {}
+    };
+  },
+
+  components: {
+    PulseLoader: VueSpinner.PulseLoader,
+  },
+
+  mounted() {
+    this.checkForForm();
+    this.CUF = HC.CUF;
+    this.sortQuestions(this.CUF._children);
+    this.checkForDeepLink();
+    this.findSelectedAnswer();
+  },
+
+  methods: {
+    checkForForm() {
+      if (!!document.querySelector('.request-form')) {
+        if (document.querySelector('.request-form').style.display != 'block') {
+          this.formOpen = false;
+        } else {
+          this.formOpen = true;
+        }
+      }
+    },
+    checkForDeepLink() {
+      if (window.location.href.includes("start=")) {
+        console.log('has deep link');
+        const searchParams = new URLSearchParams(window.location.search);
+        let deepLinkID = searchParams.get('start');
+
+        if (deepLinkID.includes('?')) {
+          console.log('has ?');
+          deepLinkID = deepLinkID.match(/\d/g).join("");
+        }
+
+        console.log(searchParams);
+        console.log(deepLinkID);
+        let newCUF;
+
+        function recurse(arr, parent) {
+          for (let i = 0; i < arr.length; i++) {
+            const item = arr[i];
+            if (item.url_key == deepLinkID) {
+              const foundStartAnswer = parent._children.find(option => option == item);
+              if (foundStartAnswer) {
+                console.log('start answer', foundStartAnswer);
+                foundStartAnswer.selected = true;
+                parent.selected = true;
+                if (parent.parent) {
+                  console.log('parent', parent)
+                  console.log('parent parent', parent.parent)
+                  console.log('parent parent parent', parent.parent.parent)
+                  parent.parent.selected = true;
+
+                  if (parent.parent.parent) {
+                    parent.parent.parent.selected = true;
+
+                    if (parent.parent.parent.parent) {
+                      parent.parent.parent.parent.selected = true;
+
+                      if (parent.parent.parent.parent.parent) {
+                        parent.parent.parent.parent.parent.selected = true;
+
+                        if (parent.parent.parent.parent.parent.parent) {
+                          parent.parent.parent.parent.parent.parent.selected = true;
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+              // newCUF = parent;
+              break;
+            }
+            if (item._children && (item.kind === 'question' || item.kind === 'answer'))
+              recurse(item._children, item);
+          }
+        }
+
+        recurse(HC.CUF._children, this.CUF)
+        console.log(this.CUF);
+      }
+    },
+    
+    renderFormNoCUF() {
+      if (window.location.href.includes('ticket_form_id')) {
+        if (this.findItemNested(this.CUF._children, []) == '') {
+          document.querySelector('#v-contact-us-flow').style.display = 'none';
+        }
+      }
+    },
+
+    // sort all questions
+    sortQuestions(arr) {
+      this.sortByPriority(arr);
+      arr.forEach(child => {
+        if (child._children && child._children.length) {
+          const questionInput = child._children.find(child => child.kind === 'question');
+          if (questionInput) {
+            this.sortQuestions(questionInput._children);
+          }
+          
+        }
+      })
+
+    },
+
+    // Sort the answers by priority property
+    sortByPriority(questionArr) {
+      const sortedQuestionArr = questionArr.sort((a, b) => {
+        return a.priority >= b.priority ? 1 : -1;
+      });
+
+      return sortedQuestionArr;
+    },
+
+    // Finds all the answers in CUF with the property selected: true
+    findItemNested(arr, selected) {
+      arr.forEach((item) => {
+        if (item.selected === true) {
+          const obj = {
+            key: item.url_key,
+            text: item.text
+          }
+          selected.push(obj);
+        }
+        if (item._children && (item.kind === 'question' || item.kind === 'answer'))
+          this.findItemNested(item._children, selected);
+      });
+
+      return selected;
+    },
+
+    // Presets the CUF with selected answers if present
+    findSelectedAnswer() {
+      let answer1 = null;
+      let answer2 = null;
+      let answer3 = null;
+      let answer4 = null;
+      let answer5 = null;
+
+      const urlParams = new URLSearchParams(window.location.search);
+      if (urlParams.get('selectedAnswers')) {
+        const selectedFromUrl = urlParams.get('selectedAnswers');
+        console.log('has selected answers', selectedFromUrl)
+        const selectedArr = selectedFromUrl.split(',');
+
+        const foundAnswer1 = this.CUF._children.find((child) => {
+          return child.url_key == selectedArr[0];
+        });
+
+        if (foundAnswer1) {
+          answer1 = foundAnswer1;
+          this.selectedAnswers.firstAnswer = selectedArr[0];
+          console.log(answer1)
+          answer1.selected = true;
+        }
+
+        if (selectedArr[1]) {
+          const foundAnswer1QArr = answer1._children.find(child => child.kind === 'question');
+
+          if (foundAnswer1QArr) {
+            const foundAnswer2 = foundAnswer1QArr._children.find(child => child.url_key == selectedArr[1]);
+
+            if (foundAnswer2) {
+              answer2 = foundAnswer2;
+              this.selectedAnswers.secondAnswer = selectedArr[1];
+            
+              console.log(answer2);
+              answer2.selected = true;
+            }
+          }
+        }
+
+        if (selectedArr[2]) {
+          const foundAnswer2QArr = answer2._children.find(child => child.kind === 'question');
+
+          if (foundAnswer2QArr) {
+            const foundAnswer3 = foundAnswer2QArr._children.find(child => child.url_key == selectedArr[2]);
+
+            if (foundAnswer3) {
+              answer3 = foundAnswer3;
+              this.selectedAnswers.thirdAnswer = selectedArr[2];
+              console.log(answer3);
+              answer3.selected = true;
+            }
+          }
+        }
+
+        if (selectedArr[3]) {
+          const foundAnswer3QArr = answer3._children.find(child => child.kind === 'question');
+
+          if (foundAnswer3QArr) {
+            const foundAnswer4 = foundAnswer3QArr._children.find(child => child.url_key == selectedArr[3]);
+
+            if (foundAnswer4) {
+              answer4 = foundAnswer4;
+              this.selectedAnswers.fourthAnswer = selectedArr[3];
+              console.log(answer4);
+              answer4.selected = true;
+            }
+          }
+        }
+        if (selectedArr[4]) {
+          const foundAnswer4QArr = answer4._children.find(child => child.kind === 'question');
+
+          if (foundAnswer4QArr) {
+            const foundAnswer5 = foundAnswer4QArr._children.find(child => child.url_key == selectedArr[4]);
+            console.log(foundAnswer5);
+            if (foundAnswer5) {
+              answer5 = foundAnswer5;
+              this.selectedAnswers.fifthAnswer = selectedArr[4];
+              console.log(answer5);
+              answer5.selected = true;
+            }
+          }
+        }
+      } 
+
+      const foundSelected = this.CUF._children.find((child) => {
+        return child.selected === true;
+      });
+
+      if (foundSelected) {        
+        console.log('found lv 1 selected', foundSelected);
+        this.firstAnswer = foundSelected;
+        this.selectedAnswers.firstAnswer = foundSelected.url_key;
+        console.log(this.selectedAnswers)
+        this.hasSelected = true;
+        this.sortBlurb(this.firstAnswer);
+
+
+        this.addTags(this.firstAnswer);
+        if (this.checkIfInputHas(this.firstAnswer, 'form')) {
+          console.log('has lv 1 form');
+          if (this.firstAnswer) {
+            this.selectedAnswers.firstAnswer = this.firstAnswer.url_key;
+            console.log(answer1)
+            this.firstAnswer.selected = true;
+          }
+          document.querySelector('.request-form').style.display = 'block';
+
+          if (!window.location.href.includes('ticket_form_id')) {
+            this.isLoading = true;
+            console.log('has a lv1 form not already on a form page');
+            this.fillForms(this.firstAnswer);
+          }
+        }
+
+        if (this.checkIfInputHas(this.firstAnswer, 'question')) {
+          console.log('has lv2 questions', this.firstAnswer._children);
+          console.log(this.firstAnswer.blocking)
+          console.log(JSON.stringify(this.secondAnswer) === '{}');
+          if (this.firstAnswer.blocking == true && this.selectedAnswers.secondAnswer == null) {
+            console.log('Blocking lv1 answer preset');
+            this.hasLv2 = true;
+            this.hasLv1Blocking = true;
+            this.stopTheFlowAfterBlocking = true;
+          } else {
+            this.hasLv2 = true;
+            this.hasLv1Blocking = false;
+            this.noNeedMoreHelpLv1 = false;
+          }
+          const selectedArr = this.firstAnswer._children.find((child) => {
+            return child.kind === 'question';
+          });
+          this.secondQuestionArr = selectedArr;
+          const foundSecondSelectedAnswer = selectedArr._children.find((answer) => answer.selected === true);
+          if (foundSecondSelectedAnswer) {
+            console.log('found lv2 selected answer', foundSecondSelectedAnswer);
+            this.secondAnswer = foundSecondSelectedAnswer;
+            this.selectedAnswers.secondAnswer = this.secondAnswer.url_key;
+            this.secondAnswer.selected = true;
+
+            this.hasLv2 = true;
+            this.sortBlurb(this.secondAnswer);
+
+            this.addTags(this.secondAnswer);
+
+
+            // If the answer has a blocking
+            if (foundSecondSelectedAnswer.blocking === true) {
+              console.log('Blocking lv2 answer');
+              this.hasLv2Blocking = true;
+              this.stopTheFlowAfterBlocking = true;
+
+              if (this.hasLv2Blocking) {
+                console.log('has blocking cuf')
+                document.querySelector('.request-form').style.display = 'none';
+              } else {
+                document.querySelector('.request-form').style.display = 'block';
+              }
+
+              if (
+                this.checkIfInputHas(foundSecondSelectedAnswer, 'form') &&
+                !window.location.href.includes('ticket_form_id')
+              ) {
+                console.log('has a lv2 form');
+                this.isLoading = true;
+                this.fillForms(this.secondAnswer);
+              }
+
+              if (this.checkIfInputHas(foundSecondSelectedAnswer, 'question')) {
+                console.log('has lv3 questions', foundSecondSelectedAnswer._children);
+                this.hasLv3 = true;
+
+                const thirdQuestion = this.secondAnswer._children.find((child) => child.kind === 'question');
+                const foundThirdSelectedAnswer = thirdQuestion._children.find((child) => child.selected === true);
+                if (foundThirdSelectedAnswer) {
+                  this.thirdAnswer = foundThirdSelectedAnswer;
+                  console.log('found third answer', this.thirdAnswer)
+                  this.sortBlurb(this.thirdAnswer);
+                  this.hasLv3 = true;
+                  this.hasLv2Blocking = false;
+                  this.stopTheFlowAfterBlocking = false;
+
+                  this.addTags(this.thirdAnswer);
+
+
+                  if (this.thirdAnswer.blocking) {
+                    console.log('has lvl 3 blocking');
+                    this.hasLv3Blocking = true;
+                    document.querySelector('.request-form').style.display = 'none';
+                  } else {
+                    document.querySelector('.request-form').style.display = 'block';
+                  }
+
+
+                  if (
+                    this.checkIfInputHas(this.thirdAnswer, 'form') &&
+                    !window.location.href.includes('ticket_form_id')
+                  ) {
+                    console.log('has a lv3 form');
+                    this.isLoading = true;
+                    this.fillForms(this.thirdAnswer);
+                  }
+
+                  if (!!this.thirdAnswer._children) {
+                    // if (this.checkIfInputHas(foundThirdSelectedAnswer, 'question')) {
+                      console.log('has lv4 questions', foundThirdSelectedAnswer._children);
+                      this.hasLv4 = true;
+      
+                      const fourthQuestion = this.thirdAnswer._children.find((child) => child.kind === 'question');
+                      const foundFourthSelectedAnswer = fourthQuestion?._children?.find((child) => child.selected === true);
+
+
+
+                      if (foundFourthSelectedAnswer) {
+                        this.fourthAnswer = foundFourthSelectedAnswer;
+                        this.sortBlurb(this.fourthAnswer);
+                        this.hasLv3Blocking= false;
+      
+                        this.addTags(this.fourthAnswer);
+                        document.querySelector('.request-form').style.display = 'block';
+
+      
+                        if (
+                          this.checkIfInputHas(this.fourthAnswer, 'form') &&
+                          !window.location.href.includes('ticket_form_id')
+                        ) {
+                          console.log('has a lv4 form');
+                          this.isLoading = true;
+                          this.fillForms(this.fourthAnswer);
+                        }
+                      }
+                    }
+                }
+              }
+            } else {
+              this.hasLv2Blocking = false;
+              this.stopTheFlowAfterBlocking = false;
+              document.querySelector('.request-form').style.display = 'block';
+
+              if (
+                this.checkIfInputHas(foundSecondSelectedAnswer, 'form') &&
+                !window.location.href.includes('ticket_form_id')
+              ) {
+                console.log('has a lv2 form');
+                this.isLoading = true;
+                this.fillForms(this.secondAnswer);
+              }
+
+              if (this.checkIfInputHas(foundSecondSelectedAnswer, 'question')) {
+                console.log('has lv3 questions', foundSecondSelectedAnswer._children);
+                this.hasLv3 = true;
+                this.hasLv2Blocking = false;
+
+                const thirdQuestion = this.secondAnswer._children.find((child) => child.kind === 'question');
+                const foundThirdSelectedAnswer = thirdQuestion._children.find((child) => child.selected === true);
+                if (foundThirdSelectedAnswer) {
+                  this.thirdAnswer = foundThirdSelectedAnswer;
+                  this.selectedAnswers.thirdAnswer = foundThirdSelectedAnswer.url_key;
+                  console.log(this.thirdAnswer)
+                  this.sortBlurb(this.thirdAnswer);
+                  this.hasLv3 = true;
+
+                  this.addTags(this.thirdAnswer);
+
+                  // IF LVL3 BLOCKING
+                  if (foundThirdSelectedAnswer.blocking === true) {
+                    if (!!document.getElementsByClassName('cuf-blocking-yesno')) {
+                      console.log('has blocking cuf')
+                      document.querySelector('.request-form').style.display = 'none';
+                    } else {
+                      document.querySelector('.request-form').style.display = 'block';
+                    }
+                    this.hasLv3Blocking = true;
+                    this.stopTheFlowAfterBlocking = true;
+
+                    if (
+                      this.checkIfInputHas(foundThirdSelectedAnswer, 'form') &&
+                      !window.location.href.includes('ticket_form_id')
+                    ) {
+                      console.log('has a lv3 form');
+                      this.isLoading = true;
+                      this.fillForms(this.thirdAnswer);
+                    }
+      
+                    if (!!this.thirdAnswer._children) {
+                    // if (this.checkIfInputHas(foundThirdSelectedAnswer, 'question')) {
+                      console.log('has lv4 questions', foundThirdSelectedAnswer._children);
+                      this.hasLv4 = true;
+      
+                      const fourthQuestion = this.thirdAnswer._children.find((child) => child.kind === 'question');
+                      const foundFourthSelectedAnswer = fourthQuestion?._children?.find((child) => child.selected === true);
+                      if (foundFourthSelectedAnswer) {
+                        this.fourthAnswer = foundFourthSelectedAnswer;
+                        this.selectedAnswers.fourthAnswer = this.fourthAnswer.url_key;
+                        this.sortBlurb(this.fourthAnswer);
+                        this.hasLv3Blocking= false;
+      
+                        this.addTags(this.fourthAnswer);
+                        document.querySelector('.request-form').style.display = 'block';
+
+      
+                        if (
+                          this.checkIfInputHas(this.fourthAnswer, 'form') &&
+                          !window.location.href.includes('ticket_form_id')
+                        ) {
+                          console.log('has a lv4 form');
+                          this.isLoading = true;
+                          this.fillForms(this.fourthAnswer);
+                        }
+
+                        if (this.checkIfInputHas(this.fourthAnswer, 'question')) {
+                          console.log('has a lv5 question', this.fourthAnswer._children);
+  
+                          const fifthQuestion = this.fourthAnswer._children.find((child) => child.kind === 'question');
+                          console.log('5th question', fifthQuestion)
+                          const foundFifthSelectedAnswer = fifthQuestion._children.find((child) => child.selected === true);
+                          console.log(foundFifthSelectedAnswer)
+  
+                          if (foundFifthSelectedAnswer) {
+                            this.fifthAnswer = foundFifthSelectedAnswer;
+                            this.selectedAnswers.fifthAnswer = this.fifthAnswer.url_key;
+                            this.sortBlurb(this.fifthAnswer);
+                            console.log('fifth answer', this.fifthAnswer);
+                            this.hasLv5 = true;
+      
+                            this.addTags(this.fifthAnswer);
+                          }
+                        }
+
+                      }
+                    }
+                  } else {
+
+                    if (
+                      this.checkIfInputHas(this.thirdAnswer, 'form') &&
+                      !window.location.href.includes('ticket_form_id')
+                    ) {
+                      console.log('has a lv3 form');
+                      this.isLoading = true;
+                      this.fillForms(this.thirdAnswer);
+                    }
+  
+                    if (this.checkIfInputHas(this.thirdAnswer, 'question')) {
+                      console.log('has a lv4 question', this.thirdAnswer._children);
+                      this.hasLv4 = true;
+                      this.hasLv3Blocking = false;
+  
+                      const fourthQuestion = this.thirdAnswer._children.find((child) => child.kind === 'question');
+                      const foundFourthSelectedAnswer = fourthQuestion._children.find((child) => child.selected === true);
+  
+                      if (foundFourthSelectedAnswer) {
+                        this.fourthAnswer = foundFourthSelectedAnswer;
+                        this.selectedAnswers.fourthAnswer = foundFourthSelectedAnswer.url_key;
+
+                        this.sortBlurb(this.fourthAnswer);
+                        console.log('fourth answer', this.fourthAnswer);
+                        this.hasLv4 = true;
+  
+                        this.addTags(this.fourthAnswer);
+  
+  
+                        if (
+                          this.checkIfInputHas(this.fourthAnswer, 'form') &&
+                          !window.location.href.includes(`ticket_form_id=${this.returnFormID(this.fourthAnswer)}`)
+                        ) {
+                          this.isLoading = true;
+                          this.fillForms(this.fourthAnswer);
+                        }
+  
+  
+                        if (this.checkIfInputHas(this.fourthAnswer, 'question')) {
+                          console.log('has a lv5 question', this.fourthAnswer._children);
+  
+                          const fifthQuestion = this.fourthAnswer._children.find((child) => child.kind === 'question');
+                          const foundFifthSelectedAnswer = fifthQuestion._children.find((child) => child.selected === true);
+  
+                          if (foundFifthSelectedAnswer) {
+                            this.fifthAnswer = foundFifthSelectedAnswer;
+                            this.selectedAnswers.fifthAnswer = foundFifthSelectedAnswer.url_key;
+                            this.sortBlurb(this.fifthAnswer);
+                            console.log('fifth answer', this.fifthAnswer);
+                            this.hasLv5 = true;
+      
+                            this.addTags(this.fifthAnswer);
+                          }
+                        }
+                      }
+                    }
+                  }
+
+
+                  
+                }
+              }
+            }
+          }
+        }
+
+
+        
+        this.cleanCUF(this.CUF._children, foundSelected);
+      }
+
+      HC.TAGS = this.tags;
+
+      setTimeout(() => {
+
+        const cufBlocker = document.querySelector('.cuf-blocking-yesno');
+        const cufBlurbs = document.querySelectorAll('.cuf-blurb');
+
+        if (document.referrer.includes('start=')) {
+          console.log('scroll into view')
+          document.querySelector('#main-content.form').scrollIntoView({ behavior: "smooth", block: "start", inline: "nearest" });
+        } else {
+          console.log('scrollIntoView cuf')
+          if (window.location.href.includes('ticket_form_id')) {
+            console.log('scroll on ticket form')
+            if (!!cufBlocker && !this.formOpen && !!cufBlurbs) {
+              console.log('scrooll with blocker and blurbs and no form open')
+              cufBlurbs[cufBlurbs.length-1].scrollIntoView({ behavior: "smooth", block: "center", inline: "nearest" });
+            }
+            else if (!!cufBlocker) {
+              cufBlocker.scrollIntoView({ behavior: "smooth", block: "center", inline: "nearest" });
+
+            }
+             else {
+              console.log('scroll no blocker')
+              if (!!cufBlurbs && !this.formOpen) {
+                cufBlurbs[cufBlurbs.length-1].scrollIntoView({ behavior: "smooth", block: "center", inline: "nearest" });
+              } 
+              else if (!!cufBlurbs && !!this.formOpen) {
+                cufBlurbs[cufBlurbs.length-1].scrollIntoView({ behavior: "smooth", block: "center", inline: "nearest" });
+              }
+              else {
+                document.querySelector('.request-form').scrollIntoView({ behavior: "smooth", block: "start", inline: "nearest" });
+              }
+            }
+          } else {
+            if (!!cufBlocker) {
+              if (cufBlurbs.length) {
+                cufBlurbs[cufBlurbs.length-1].scrollIntoView({ behavior: "smooth", block: "center", inline: "nearest" });
+              } else {
+                cufBlocker.scrollIntoView({ behavior: "smooth", block: "center", inline: "nearest" });
+              }
+            } else {
+              if (cufBlurbs.length) {
+                cufBlurbs[cufBlurbs.length-1].scrollIntoView({ behavior: "smooth", block: "center", inline: "nearest" });
+              } else {
+                if (document.querySelectorAll('.cuf-followup').length) {
+                  document.querySelectorAll('.cuf-followup')[document.querySelectorAll('.cuf-followup').length-1].scrollIntoView({ behavior: "smooth", block: "start", inline: "nearest" });
+                }
+                // if (document.querySelectorAll('#new_request').length) {
+                //   document.querySelector('#new_request').scrollIntoView({ behavior: "smooth", block: "start", inline: "nearest" });
+                // }
+    
+              }
+
+            }
+            
+          }
+        }
+      }, 500)
+    },
+
+    cleanCUF(arr, foundSelected) {
+			arr.forEach((item) => {
+				if (item.key === foundSelected.key){}
+				else {
+					item._children.forEach(child => child.selected = false);
+					if (item._children && item._children.length) {
+						this.cleanCUF(item._children, foundSelected);
+					}
+				}
+			  });
+
+			return true;
+		},
+
+    addTags(input) {
+      if (input.tags !== '[]') {
+        const newTags = input.tags.replaceAll('"', '').replace('[', '').replace(']','').split(', ');
+        newTags.forEach(tag => {
+          if (!this.tags.includes(tag)) {
+            this.tags.push(tag);
+          }
+        })
+      }
+      console.log('TAGS:', this.tags);
+    },
+
+    // Helper function to check if the input object's children has a property kind: kind
+    checkIfInputHas(input, kind) {
+      return input._children.some((child) => child.kind === kind);
+    },
+
+    // Helper func to grab the form id if the input's children has a form
+    returnFormID(input) {
+      const text = input._children.find((child) => child.kind === 'form').text;
+      return HC.formMappings[text.toLowerCase().replaceAll(' ', '-')].id;
+    },
+
+    // get dc for child
+    getDCInput(child) {
+      if (`snapchat_support-cuf-${child.kind}-${child.url_key}` in HC.SETTINGS.DC === false) {
+        return child.text;
+      } else {
+        return HC.SETTINGS.DC[`snapchat_support-cuf-${child.kind}-${child.url_key}`].replace(/^"(.*)"$/, '$1');
+      }
+    },
+
+    // formats the blurb and returns dc of blurb
+    blurb(input) {
+      const blurbKey = `snapchat_support-cuf-blurb-${input.url_key.toLowerCase()}`;
+      if (HC.SETTINGS.DC[blurbKey]) {
+        return HC.SETTINGS.DC[blurbKey].replace(/(^"|"$)/g, '');
+      }
+    },
+
+    // sorting the children of the input so that the blurb renders first before other children
+    sortBlurb(input) {
+      if (input._children.length) {
+        const blurb = input._children.find((inp) => inp.kind === 'intermediate-blurb');
+        input._children.sort((x, y) => (x == blurb ? -1 : y == blurb ? 1 : 0));
+      }
+    },
+
+    // Save the fifth input
+    saveFifthInput(input) {
+      console.log('fifth input', input)
+      this.fifthAnswer = input;
+      this.addTags(input);
+      this.sortBlurb(input);
+      this.selectedAnswers.fifthAnswer = input.url_key;
+
+
+      gtag('event', 'select_item', {
+        'event_category': 'CUF Node Selections',
+        'event_label': input.text,
+        'value': 1
+      });
+
+      let cufCopy = this.CUF;
+      const selectedInput = cufCopy._children.find((input) => {
+        return input.selected === true;
+      });
+
+      const secondQuestion = selectedInput._children.find((child) => child.kind === 'question');
+      const secondQAnswer = secondQuestion._children.find((input) => input.selected === true);
+
+      const thirdQuestion = secondQAnswer._children.find((child) => child.kind === 'question');
+
+      console.log('third question', thirdQuestion);
+      const thirdQAnswer = thirdQuestion._children.find((child) => child.selected == true);
+      console.log('third answer', thirdQAnswer);
+      const fourthQuestion = thirdQAnswer._children.find((child) => child.kind === 'question');
+      console.log('fourth question', fourthQuestion);      
+      const fourthAnswer = fourthQuestion._children.find((child) => child.selected == true);
+      console.log(fourthAnswer);
+      const fifthQuestion = fourthAnswer._children.find((child) => child.kind === 'question');
+
+      const answerIdx = fifthQuestion._children.indexOf(input);
+      console.log(answerIdx);
+
+      fifthQuestion._children.forEach((child) => (child.selected = false));
+
+      fifthQuestion._children[answerIdx] = { ...input, selected: true };
+      console.log(fifthQuestion);
+
+      this.CUF = cufCopy;
+      if (this.checkIfInputHas(this.fifthAnswer, 'form')) {
+        console.log('going to form');
+        this.isLoading = true;
+        this.fillForms(this.fifthAnswer);
+      }
+    },
+
+    // Save the fourth input
+    saveFourthInput(input) {
+      console.log(
+        'fourth input',
+        input._children.map((i) => i.kind)
+      );
+      this.fourthAnswer = input;
+      this.selectedAnswers.fourthAnswer = input.url_key;
+      console.log(this.selectedAnswers)
+      if (!this.fourthAnswer._children.every((child) => child.kind === 'form')) {
+        console.log('fourth input has more than a form');
+        this.hasLv4 = true;
+        this.hasLv5 = false;
+      }
+
+      this.addTags(input);
+      this.sortBlurb(input);
+
+      gtag('event', 'select_item', {
+        'event_category': 'CUF Node Selections',
+        'event_label': input.text,
+        'value': 1
+      });
+
+      let cufCopy = this.CUF;
+      const selectedInput = cufCopy._children.find((input) => {
+        return input.selected === true;
+      });
+
+      const secondQuestion = selectedInput._children.find((child) => child.kind === 'question');
+      const secondQAnswer = secondQuestion._children.find((input) => input.selected === true);
+
+      const thirdQuestion = secondQAnswer._children.find((child) => child.kind === 'question');
+
+      console.log('third question', thirdQuestion);
+      const thirdQAnswer = thirdQuestion._children.find((child) => child.selected == true);
+      console.log('third answer', thirdQAnswer);
+      const fourthQuestion = thirdQAnswer._children.find((child) => child.kind === 'question');
+      console.log('fourth question', fourthQuestion);
+      console.log('here', thirdQAnswer._children);
+      console.log('here2', fourthQuestion);
+      const answerIdx = fourthQuestion._children.indexOf(input);
+
+      // Checking if the fourth level are checkboxes or radio buttons - Maria
+      if (fourthQuestion.type === 'checkbox') {
+        fourthQuestion._children[answerIdx] = { ...input, selected: true };
+
+        this.CUF = cufCopy;
+        this.isLoading = true;
+        this.fillForms(this.fourthAnswer);
+      } else {
+        fourthQuestion._children.forEach((child) => (child.selected = false));
+
+        fourthQuestion._children[answerIdx] = { ...input, selected: true };
+        console.log(fourthQuestion);
+        this.clearSiblingsChildren(fourthQuestion._children)
+
+        this.CUF = cufCopy;
+
+
+        if (this.checkIfInputHas(this.fourthAnswer, 'form')) {
+          console.log('going to form');
+          this.isLoading = true;
+          this.fillForms(this.fourthAnswer);
+        }
+      }
+    },
+
+    // Save the third input
+    saveThirdInput(input) {
+      console.log('third input', input);
+      this.thirdAnswer = input;
+      this.fourthAnswer = {};
+      this.fifthAnswer = {};
+      this.hasLv3 = true;
+      this.hasLv4 = false;
+      this.hasLv5 = false;
+
+      this.selectedAnswers.thirdAnswer = input.url_key;
+      console.log(this.selectedAnswers)
+
+      this.sortBlurb(input);
+      
+      this.addTags(input);
+
+
+      let cufCopy = this.CUF;
+      const selectedInput = cufCopy._children.find((input) => {
+        return input.selected === true;
+      });
+
+      const secondQuestion = selectedInput._children.find((child) => child.kind === 'question');
+      const secondQAnswer = secondQuestion._children.find((input) => input.selected === true);
+
+      const thirdQuestion = secondQAnswer._children.find((child) => child.kind === 'question');
+      console.log('third question', thirdQuestion);
+
+      const answerIdx = thirdQuestion._children.indexOf(input);
+
+      const inputQuestionArr = input._children.find(child => child.kind === 'question');
+      console.log(inputQuestionArr);
+      if (inputQuestionArr) {
+        console.log('has 4th questions');
+        
+        this.hasLv4 = true;
+      }
+      inputQuestionArr?._children?.forEach(child => {
+        child.selected = false;
+      })
+
+      // reset children answers
+      thirdQuestion._children?.forEach((child) => (child.selected = false));
+
+      thirdQuestion._children[answerIdx] = { ...input, selected: true };
+
+      this.CUF = cufCopy;
+
+      gtag('event', 'select_item', {
+        'event_category': 'CUF Node Selections',
+        'event_label': input.text,
+        'value': 1
+      });
+
+      this.fillForms(input);
+
+      if (input.blocking === true && this.checkIfInputHas(input, 'intermediate-blurb')) {
+        console.log('Blocking lv3 answer');
+
+        this.hasLv3Blocking = true;
+        this.stopTheFlowAfterBlocking = true;
+        document.querySelector('.cuf-blocking-yes-value')?.classList.remove('highlight-cuf-blocking-value');
+        document.querySelector('.cuf-blocking-no-value')?.classList.remove('highlight-cuf-blocking-value');
+
+      } else {
+        this.hasLv3Blocking = false;
+        this.noNeedMoreHelpLv3 = false;
+        this.stopTheFlowAfterBlocking = false;
+      }
+
+      
+      
+      if (document.querySelector('.cuf-followup')) {
+        document.querySelectorAll('.cuf-followup')[document.querySelectorAll('.cuf-followup').length-1].scrollIntoView({ behavior: "smooth", block: "start", inline: "nearest" })
+      }
+      if (document.querySelector('#new_request')) {
+        document.querySelector('#new_request').scrollIntoView({ behavior: "smooth", block: "start", inline: "nearest" });
+      }
+    },
+
+    // Saves the second input
+    saveSecondInput(input) {
+      console.log('second input', input);
+      this.secondAnswer = input;
+      this.selectedAnswers.secondAnswer = input.url_key;
+      console.log(this.selectedAnswers)
+      this.thirdAnswer = {};
+      this.fourthAnswer = {};
+      this.fifthAnswer = {};
+      this.hasLv3 = false;
+      this.hasLv4 = false;
+      this.hasLv5 = false;
+
+      const newInput = {
+        ...input,
+        selected: true,
+      };
+
+      if (input.tags !== '[]') {
+        const newTags = input.tags.replaceAll('"', '').replace('[', '').replace(']','').split(', ');
+        newTags.forEach(tag => {
+          if (!this.tags.includes(tag)) {
+            this.tags.push(tag);
+          }
+        })
+      }
+
+      this.sortBlurb(input);
+
+      let cufCopy = this.CUF;
+      const selectedInput = cufCopy._children.find((input) => {
+        return input.selected === true;
+      });
+      const questionArr = selectedInput._children.find((child) => child.kind === 'question');
+      this.secondQuestionArr = questionArr;
+      if (this.secondQuestionArr) {
+        console.log('has a second question', this.secondQuestionArr)
+        this.hasLv3 = true;
+      }
+      const questionIdx = questionArr._children.indexOf(input);
+
+      // reset children question
+      questionArr._children.forEach((child) => {
+        child.selected = false;
+      });
+
+      this.clearSelectedChildren(newInput);
+      this.clearSiblingsChildren(questionArr._children);
+
+      questionArr._children[questionIdx] = newInput;
+
+      this.CUF = cufCopy;
+      this.fillForms(input);
+
+      if (newInput.blocking === true && this.checkIfInputHas(newInput, 'intermediate-blurb')) {
+        console.log('Blocking lv2 answer');
+
+        this.hasLv2Blocking = true;
+        this.stopTheFlowAfterBlocking = true;
+        document.querySelector('.cuf-blocking-yes-value')?.classList.remove('highlight-cuf-blocking-value');
+        document.querySelector('.cuf-blocking-no-value')?.classList.remove('highlight-cuf-blocking-value');
+
+      } else {
+        this.hasLv2Blocking = false;
+        this.noNeedMoreHelpLv2 = false;
+        this.stopTheFlowAfterBlocking = false;
+      }
+
+      gtag('event', 'select_item', {
+        'event_category': 'CUF Node Selections',
+        'event_label': input.text,
+        'value': 1
+      });
+      
+      if (document.querySelector('.cuf-followup')) {
+        document.querySelectorAll('.cuf-followup')[document.querySelectorAll('.cuf-followup').length-1].scrollIntoView({ behavior: "smooth", block: "start", inline: "nearest" })
+      }
+      if (document.querySelector('#new_request')) {
+        document.querySelector('#new_request').scrollIntoView({ behavior: "smooth", block: "start", inline: "nearest" });
+      }
+    },
+
+    // Marks all children of the questionArr to be unselected => selected: false
+    clearSiblingsChildren(questionArr) {
+      questionArr.forEach((answer) => {
+        answer._children.forEach((child) => {
+          if (child.kind === 'question') {
+            child._children.forEach((c) => {
+              c.selected = false;
+            });
+          }
+        });
+      });
+    },
+
+    unselectedHandler(newInput, cufCopy) {
+      const selectedAnswer = cufCopy._children.find(child => child.selected === true);
+
+      if (selectedAnswer !== newInput) {
+        gtag("event", "deselect_item", {
+          event_label:  newInput.text,
+          event_category: "Contact Us Flow"
+        });
+      }
+    },
+
+    clearSelectedAnswers() {
+      for (const prop of Object.getOwnPropertyNames(this.selectedAnswers)) {
+        delete this.selectedAnswers[prop];
+      }
+    },
+
+    // Save first input
+		saveFirstInput(input) {
+      this.isLoading = true
+      
+      if (!input.selected) {
+        console.log('first input', input);
+        this.tags = [];
+        this.secondAnswer = {};
+        this.thirdAnswer = {};
+        this.fourthAnswer = {};
+        this.fifthAnswer = {};
+
+        this.clearSelectedAnswers();
+
+        let cufCopy = HC.CUF;
+        const newInput = {
+          ...input,
+          selected: true,
+        };
+        this.firstAnswer = newInput; 
+        this.hasSelected = true;
+        this.selectedAnswers.firstAnswer = this.firstAnswer.url_key;
+        console.log(this.selectedAnswers)
+        if (!this.firstAnswer._children.every((child) => child.kind === 'form')) {
+          this.hasLv2 = true;
+          this.hasLv3 = false;
+          this.hasLv4 = false;
+          this.hasLv5 = false;
+
+          this.secondAnswer = {};
+          this.thirdAnswer = {};
+          this.fourthAnswer = {};
+          this.fifthAnswer = {};
+        }
+  
+        this.addTags(input);
+        this.sortBlurb(input);
+  
+        this.unselectedHandler(input, cufCopy)
+
+        if (input._children.length) {
+          const blurb = input._children.find(
+            (inp) => inp.kind === 'intermediate-blurb'
+          );
+          input._children.sort((x, y) => (x == blurb ? -1 : y == blurb ? 1 : 0));
+        }
+  
+        if (newInput.blocking === true && this.checkIfInputHas(newInput, 'intermediate-blurb')) {
+          console.log('Blocking lv1 answer');
+
+          this.hasLv1Blocking = true;
+          this.stopTheFlowAfterBlocking = true;
+          document.querySelector('.cuf-blocking-yes-value')?.classList.remove('highlight-cuf-blocking-value');
+          document.querySelector('.cuf-blocking-no-value')?.classList.remove('highlight-cuf-blocking-value');
+
+        } else {
+          this.hasLv1Blocking = false;
+          this.noNeedMoreHelpLv1 = false;
+          this.stopTheFlowAfterBlocking = false;
+        }
+
+        this.clearSiblingsInCUF(cufCopy);
+        this.clearSelectedChildren(newInput)
+        this.clearSiblingsChildren(cufCopy._children)
+        this.replacesCUFInput(newInput, cufCopy);
+        this.cleanCUF(cufCopy._children, newInput);
+        
+        this.isLoading = false
+        this.fillForms(input);
+
+        gtag('event', 'select_item', {
+          'event_category': 'CUF Node Selections',
+          'event_label': input.text,
+          'value': 1
+        });
+
+      } else {
+        this.isLoading = false
+      }
+      
+      setTimeout(() => {
+        const cufBlocker = document.querySelector('.cuf-blocking-yesno');
+        const cufBlurbs = document.querySelectorAll('.cuf-blurb');
+
+        if (window.location.href.includes('ticket_form_id')) {
+          if (!!cufBlocker && !this.formOpen && !!cufBlurbs) {
+            console.log('scrooll with blocker and blurbs and no form open')
+            cufBlurbs[cufBlurbs.length-1].scrollIntoView({ behavior: "smooth", block: "center", inline: "nearest" });
+          }
+          else if (!!cufBlocker) {
+            cufBlocker.scrollIntoView({ behavior: "smooth", block: "center", inline: "nearest" });
+
+          }
+           else {
+            console.log('scroll no blocker')
+            if (!!cufBlurbs && !this.formOpen) {
+              cufBlurbs[cufBlurbs.length-1].scrollIntoView({ behavior: "smooth", block: "center", inline: "nearest" });
+            } 
+            else if (!!cufBlurbs && !!this.formOpen) {
+              cufBlurbs[cufBlurbs.length-1].scrollIntoView({ behavior: "smooth", block: "center", inline: "nearest" });
+            }
+            else {
+              document.querySelector('.request-form').scrollIntoView({ behavior: "smooth", block: "start", inline: "nearest" });
+            }
+          }
+        } else {
+          console.log('scroll no form')
+          if (!!cufBlurbs && !this.formOpen) {
+            cufBlurbs[cufBlurbs.length-1].scrollIntoView({ behavior: "smooth", block: "center", inline: "nearest" });
+          } else {
+            if (!!document.querySelectorAll('.cuf-followup')) {
+              document.querySelectorAll('.cuf-followup')[document.querySelectorAll('.cuf-followup').length-1].scrollIntoView({ behavior: "smooth", block: "start", inline: "nearest" })
+            }
+
+          }
+        }
+  
+        
+
+      }, 500);
+      
+		},
+
+    // Clear top level siblings to be unselected
+    clearSiblingsInCUF(cuf) {
+      cuf._children.forEach((child) => (child.selected = false));
+    },
+
+    // Clear Children of the input to be unselected
+    clearSelectedChildren(input) {
+      if (this.checkIfInputHas(input, 'question')) {
+        const questionInput = input._children.find((child) => child.kind === 'question');
+        const answerArr = questionInput._children;
+        answerArr.forEach((answer) => (answer.selected = false));
+      }
+    },
+
+    // Replaces CUF with a cufCopy where the input is replaced with a newInput
+    replacesCUFInput(newInput, cuf) {
+      let cufCopy = cuf;
+      const foundInput = cufCopy._children.find((input) => {
+        return input.key === newInput.key;
+      });
+      const foundInputIdx = cufCopy._children.indexOf(foundInput);
+
+      cufCopy._children[foundInputIdx] = newInput;
+      this.CUF = cufCopy;
+    },
+
+    // if input has a form, goToForm else reload
+    fillForms(input) {
+      this.isLoading = true;
+      const foundForm = input._children.find((ch) => ch.kind === 'form');
+      if (foundForm) {
+        this.goToForm(foundForm);
+      } else {
+        this.isLoading = false;
+        if (window.location.href.includes('ticket_form_id')) {
+          window.location.href = `/hc/${HC.SETTINGS.hcLocale}/requests/new`;
+        }
+      }
+    },
+
+    // try to redirect to form link
+    goToForm(formInput) {
+      setTimeout(() => {
+        if (HC.formMappings[formInput.text.toLowerCase().replaceAll(' ', '-')]) {
+          let formLink = `/hc/${HC.SETTINGS.hcLocale}/requests/new?ticket_form_id=${
+            HC.formMappings[formInput.text.toLowerCase().replaceAll(' ', '-')].id
+          }&selectedAnswers=${Object.values(this.selectedAnswers).join(',')}`;
+          this.isLoading = true;
+          console.log(formLink);
+          if (navigator.userAgent.match(/Android/i)) {
+            document.location = formLink;
+          } else {
+            window.location.href = formLink;
+          }
+        } else {
+          console.log('%cnot found in hc.formMappings', 'color: red');
+          console.log('%cform text key', 'color: aqua', formInput.text);
+          this.isLoading = false;
+          this.renderErrorMessages([{ ['internal_server_error']: HC.SETTINGS.DC['snapchat_support-error_messages-internal_server_error'].replace(/"/g,'') }])
+        }
+      }, 1000);
+    },
+    renderErrorMessages(errors) {
+      console.log(errors)
+      // Create errors container
+      let errorsContainer = document.querySelector('.form footer .errors-list');
+      let errorsList;
+      if (!errorsContainer) {
+        let errorsContainer;
+        errorsContainer = document.createElement('div');
+        errorsContainer.classList.add('errors-list');
+  
+        // Create errors list
+        errorsList = document.createElement('ul');
+        errorsList.classList.add('errors-list__list');
+  
+        // Append errors container to form
+        const formFooter = document.querySelector('form footer');
+        formFooter.appendChild(errorsContainer);
+  
+        // Append errors list to errors container
+        errorsContainer.appendChild(errorsList);
+      } else {
+        // Clear existing errors
+        errorsList = errorsContainer.querySelector('ul');
+        let child = errorsList.lastElementChild;
+        while (child) {
+          errorsList.removeChild(child);
+          child = errorsList.lastElementChild;
+        }
+      }
+  
+      // Create error list items
+      errors.forEach(function (error) {
+        const errorListItem = document.createElement('li');
+        errorListItem.classList.add('errors-list__item');
+        errorListItem.innerText = Object.values(error)[0];
+        errorsList.appendChild(errorListItem);
+      });
+  
+      // Update fields to error state
+      errors.forEach(function (error) {
+        const field = Object.keys(error)[0];
+        if (field != 'internal_server_error') {
+          const keys = getFieldKeys(field);
+          const fieldElement = document?.querySelector(`.${keys.join('_')}`);
+          if (fieldElement) {
+            fieldElement.classList.add('is-error');
+            fieldElement.addEventListener('change', function () {
+              fieldElement.classList.remove('is-error');
+            });
+          }
+        }
+      });
+    },
+    // Blocking box with yes and no buttons
+    needMoreHelpLv1(data) {
+      if (data === 'yes') {
+        this.noNeedMoreHelpLv1 = false;
+        this.hasLv1Blocking = false;
+        
+        document.querySelector('.cuf-blocking-yesno').style.display = 'none';
+        
+        // Show the form
+        this.stopTheFlowAfterBlocking = false;
+        document.querySelector('.request-form').style.display = 'block';
+        document.querySelector('.cuf-blocking-yes-value').classList.add('highlight-cuf-blocking-value');
+        document.querySelector('.cuf-blocking-no-value').classList.remove('highlight-cuf-blocking-value');
+
+        document.querySelector('.request-form').scrollIntoView({ behavior: "smooth", block: "start", inline: "nearest" });
+
+        gtag("event", "blocking_response", {
+          event_label: "Yes",
+          event_category: "Contact Us Flow"
+        });
+      } else {
+        this.noNeedMoreHelpLv1 = true;
+        // Stop the flow and hide the form
+        this.stopTheFlowAfterBlocking = true;
+        document.querySelector('.request-form').style.display = 'none';
+        document.querySelector('.cuf-blocking-no-value').classList.add('highlight-cuf-blocking-value');
+        document.querySelector('.cuf-blocking-yes-value').classList.remove('highlight-cuf-blocking-value');
+
+
+        gtag("event", "blocking_response", {
+          event_label: "No", 
+          event_category: "Contact Us Flow",
+        });
+      }
+    },
+    needMoreHelpLv2(data) {
+      if (data === 'yes') {
+        this.noNeedMoreHelpLv2 = false;
+        this.hasLv2Blocking = false;
+        
+        document.querySelector('.cuf-blocking-yesno').style.display = 'none';
+        
+        // Show the form
+        this.stopTheFlowAfterBlocking = false;
+        document.querySelector('.request-form').style.display = 'block';
+        document.querySelector('.cuf-blocking-yes-value').classList.add('highlight-cuf-blocking-value');
+        document.querySelector('.cuf-blocking-no-value').classList.remove('highlight-cuf-blocking-value');
+
+        document.querySelector('.request-form').scrollIntoView({ behavior: "smooth", block: "start", inline: "nearest" });
+
+        gtag("event", "blocking_response", {
+          event_label: "Yes",
+          event_category: "Contact Us Flow",          
+        });
+      } else {
+        this.noNeedMoreHelpLv2 = true;
+        // Stop the flow and hide the form
+        this.stopTheFlowAfterBlocking = true;
+        document.querySelector('.request-form').style.display = 'none';
+        document.querySelector('.cuf-blocking-no-value').classList.add('highlight-cuf-blocking-value');
+        document.querySelector('.cuf-blocking-yes-value').classList.remove('highlight-cuf-blocking-value');
+
+        gtag("event", "blocking_response", {
+          event_label: "No",
+          event_category: "Contact Us Flow",          
+        });
+      }
+    },
+    needMoreHelpLv3(data) {
+      console.log('NEED MORE HELP LV 3');
+      if (data === 'yes') {
+        this.noNeedMoreHelpLv3 = false;
+        this.hasLv3Blocking = false;
+        
+        document.querySelector('.cuf-blocking-yesno').style.display = 'none';
+        
+        // Show the form
+        this.stopTheFlowAfterBlocking = false;
+        document.querySelector('.request-form').style.display = 'block';
+        document.querySelector('.cuf-blocking-yes-value').classList.add('highlight-cuf-blocking-value');
+        document.querySelector('.cuf-blocking-no-value').classList.remove('highlight-cuf-blocking-value');
+
+        document.querySelector('.request-form').scrollIntoView({ behavior: "smooth", block: "start", inline: "nearest" });
+        gtag("event", "blocking_response", {
+          event_label: "Yes",
+          event_category: "Contact Us Flow",          
+        });
+      } else {
+        this.noNeedMoreHelpLv3 = true;
+        // Stop the flow and hide the form
+        this.stopTheFlowAfterBlocking = true;
+        document.querySelector('.request-form').style.display = 'none';
+        document.querySelector('.cuf-blocking-no-value').classList.add('highlight-cuf-blocking-value');
+        document.querySelector('.cuf-blocking-yes-value').classList.remove('highlight-cuf-blocking-value');
+
+        gtag("event", "blocking_response", {
+          event_label: "No",
+          event_category: "Contact Us Flow",          
+        });
+      }
+    },
+  },
+});
+
+// ----------- @@search sugguestions --------------------
+HC.templates.searchSuggestions = new Vue({
+  template: `
+      <ul 
+        class="search-sugguestions-list" 
+        tabindex="0" 
+        @focusout="handleFocusOut"
+        >
+        <li class="search-sugguestions-item" v-if="HC.SETTINGS.searchSuggestion1Url">
+          <a @mousedown="goToSuggestion(HC.SETTINGS.searchSuggestion1Url)">
+            {[{replaceQuotes(HC.SETTINGS.DC[HC.SETTINGS.searchSuggestion1Key])}]}
+          </a>
+        </li>
+        <li class="search-sugguestions-item" v-if="HC.SETTINGS.searchSuggestion2Url">
+          <a @mousedown="goToSuggestion(HC.SETTINGS.searchSuggestion2Url)">
+            {[{replaceQuotes(HC.SETTINGS.DC[HC.SETTINGS.searchSuggestion2Key])}]}
+          </a>
+        </li>
+        <li class="search-sugguestions-item" v-if="HC.SETTINGS.searchSuggestion3Url">
+          <a @mousedown="goToSuggestion(HC.SETTINGS.searchSuggestion3Url)">
+            {[{replaceQuotes(HC.SETTINGS.DC[HC.SETTINGS.searchSuggestion3Key])}]}
+          </a>
+        </li>
+        <li class="search-sugguestions-item" v-if="HC.SETTINGS.searchSuggestion4Url">
+          <a @mousedown="goToSuggestion(HC.SETTINGS.searchSuggestion4Url)">
+            {[{replaceQuotes(HC.SETTINGS.DC[HC.SETTINGS.searchSuggestion4Key])}]}
+          </a>
+        </li>
+        <li class="search-sugguestions-item" v-if="HC.SETTINGS.searchSuggestion5Url">
+          <a @mousedown="goToSuggestion(HC.SETTINGS.searchSuggestion5Url)">
+            {[{replaceQuotes(HC.SETTINGS.DC[HC.SETTINGS.searchSuggestion5Key])}]}
+          </a>
+        </li>
+        <li class="search-sugguestions-item" v-if="HC.SETTINGS.searchSuggestion6Url">
+          <a @mousedown="goToSuggestion(HC.SETTINGS.searchSuggestion6Url)">
+            {[{replaceQuotes(HC.SETTINGS.DC[HC.SETTINGS.searchSuggestion6Key])}]}
+          </a>
+        </li>
+      </ul>
+  `,
+  data() {
+    return {
+      articles: [],
+    };
+  },
+  mounted() {
+  },
+  methods: {
+    goToSuggestion(url) {
+      window.location.href = url.replace("/hc/articles/", `/hc/${HC.SETTINGS.hcLocale}/articles/`);
+    },
+
+    handleFocusOut(e) {
+      document.querySelector('.search-sugguestions-list').style.display = 'none';
+    },
+
+    replaceQuotes(str) {
+      return str && str.length ? str.replace(/"/g,'') : '';
+    },
+  },
+});
+
+async function organizeDC() {
+  const massDC = {};
+  const DC = await getAllDC();
+  const supportDC = DC.filter((dc) => dc.placeholder.includes('snapchat_support'));
+  supportDC.forEach((dc) => {
+    const placeholderModded = dc.placeholder.split('dc.')[1].replace('}}', '');
+    massDC[placeholderModded] = "{{ dc '" + placeholderModded + "' }}";
+  });
+  console.log(massDC);
+}
+
+
+function showOutageBanner() {
+  const elem = document.querySelector('.alert-header');
+
+  const target = document.querySelector('#snapchat-header-container');
+
+  if ((target && elem) && window.matchMedia('screen and (min-device-width: 540px) and (max-device-width: 820px)').matches) {
+    target.style.height = "200px";
+    target.classList.add('mobile-view-header');
+    target.parentNode.insertBefore(elem, target);
+
+  }
+  else if (((target && elem) && window.matchMedia('screen and (min-device-width: 412px) and (max-device-width: 540px)').matches) || ((target && elem) && window.matchMedia('screen and (min-width: 412px) and (max-width: 540px)').matches)) {
+    target.style.height = "148px";
+    target.classList.add('mobile-view-header');
+    target.parentNode.insertBefore(elem, target);
+
+  }
+  else if (((target && elem) && window.matchMedia('screen and (min-device-width: 350px) and (max-device-width: 411px)').matches) || ((target && elem) && window.matchMedia('screen and (min-width: 350px) and (max-width: 411px)').matches)) {
+    target.style.height = "165px";
+    target.classList.add('mobile-view-header');
+    target.parentNode.insertBefore(elem, target);
+  }
+  else if ((target && elem) && window.matchMedia('(max-width: 975px)').matches) {
+    target.style.height = "130px";
+    target.classList.add('mobile-view-header');
+    target.parentNode.insertBefore(elem, target);
+  }
+  
+}
+
+let observer;
+
+observer = new MutationObserver((mutations_list) => {
+  mutations_list.forEach((mutation) => {
+    mutation.addedNodes.forEach((added_node) => {
+      if (added_node.tagName == 'ZD-AUTOCOMPLETE') {
+        const autoComplete = document.getElementsByTagName('zd-autocomplete-multibrand');
+        [...autoComplete].forEach(item => {
+          const innerText = item.innerText;
+          if (innerText.toLowerCase().includes('hidden')) {
+            item.remove();
+          }
+        })
+      }
+
+    });
+  });
+});
+
+showOutageBanner();
+
+observer.observe(document, { 
+  subtree: true, 
+  childList: true,
+  attributes: true,
+  characterData: true
+})
+
+
+document.addEventListener('DOMContentLoaded', function () {
+  const searchBar = document.querySelector('input#query');
+  HC.templates.searchSuggestions.$mount('#v-search-suggestions');
+  const suggestionsList = document.querySelector('.search-sugguestions-list');
+  const searchIconPlacementMobile = document.querySelector('.search-icon');
+  
+  if (searchBar) {
+    searchBar.setAttribute('autocomplete', 'off');
+  }
+
+  searchBar?.addEventListener('focus', (e) => {
+    e.preventDefault();
+    if (suggestionsList && searchIconPlacementMobile) {
+      suggestionsList.style.display = 'block';
+      searchIconPlacementMobile.classList.add('icon-top-placement');
+    }
+  });
+
+  searchBar?.addEventListener('focusout', (e) => {
+    if (suggestionsList && searchIconPlacementMobile) {
+      suggestionsList.style.display = 'none';
+      searchIconPlacementMobile.classList.remove('icon-top-placement');
+    }
+  });
+
+  searchBar?.addEventListener('input', (event) => {
+    if (event.target.value.length > 2) {
+      if (suggestionsList && searchIconPlacementMobile) {
+        suggestionsList.style.display = 'none';
+        searchIconPlacementMobile.classList.remove('icon-top-placement');
+      }
+    }
+  });
+
+  (function handleAnchors () {
+    const articleContent = document.getElementsByClassName('article-wrapper')[0];
+    if (articleContent) {
+      const anchors = articleContent.querySelectorAll('a');
+      for (let i = 0; i < anchors.length; i++) {
+        const anchor = anchors[i]
+        let href = anchor.href;
+        if(href.indexOf('/hc/') !== -1 && !href.includes(HC.SETTINGS.hcLocale) && !href.match(/hc\/([A-Z]{2})([-]([A-Z]{2}))?/i)) {
+          anchor.href = href.replace('/hc/', `/hc/${HC.SETTINGS.hcLocale}/`);
+        }
+
+      }
+    }
+  })();
+
+
+  // Key map
+  var ENTER = 13;
+  var ESCAPE = 27;
+  var SPACE = 32;
+  var UP = 38;
+  var DOWN = 40;
+  var TAB = 9;
+
+  function closest(element, selector) {
+    if (Element.prototype.closest) {
+      return element.closest(selector);
+    }
+    do {
+      if (
+        (Element.prototype.matches && element.matches(selector)) ||
+        (Element.prototype.msMatchesSelector && element.msMatchesSelector(selector)) ||
+        (Element.prototype.webkitMatchesSelector && element.webkitMatchesSelector(selector))
+      ) {
+        return element;
+      }
+      element = element.parentElement || element.parentNode;
+    } while (element !== null && element.nodeType === 1);
+    return null;
+  }
+
+  // social share popups
+  Array.prototype.forEach.call(document.querySelectorAll('.share a'), function (anchor) {
+    anchor.addEventListener('click', function (e) {
+      e.preventDefault();
+      window.open(this.href, '', 'height = 500, width = 500');
+    });
+  });
+
+  // show form controls when the textarea receives focus or backbutton is used and value exists
+  var commentContainerTextarea = document.querySelector('.comment-container textarea'),
+    commentContainerFormControls = document.querySelector('.comment-form-controls, .comment-ccs');
+
+  if (commentContainerTextarea) {
+    commentContainerTextarea.addEventListener('focus', function focusCommentContainerTextarea() {
+      commentContainerFormControls.style.display = 'block';
+      commentContainerTextarea.removeEventListener('focus', focusCommentContainerTextarea);
+    });
+
+    if (commentContainerTextarea.value !== '') {
+      commentContainerFormControls.style.display = 'block';
+    }
+  }
+
+  // Expand Request comment form when Add to conversation is clicked
+  var showRequestCommentContainerTrigger = document.querySelector(
+      '.request-container .comment-container .comment-show-container'
+    ),
+    requestCommentFields = document.querySelectorAll('.request-container .comment-container .comment-fields'),
+    requestCommentSubmit = document.querySelector('.request-container .comment-container .request-submit-comment');
+
+  if (showRequestCommentContainerTrigger) {
+    showRequestCommentContainerTrigger.addEventListener('click', function () {
+      showRequestCommentContainerTrigger.style.display = 'none';
+      Array.prototype.forEach.call(requestCommentFields, function (e) {
+        e.style.display = 'block';
+      });
+      requestCommentSubmit.style.display = 'inline-block';
+
+      if (commentContainerTextarea) {
+        commentContainerTextarea.focus();
+      }
+    });
+  }
+
+  // Mark as solved button
+  var requestMarkAsSolvedButton = document.querySelector('.request-container .mark-as-solved:not([data-disabled])'),
+    requestMarkAsSolvedCheckbox = document.querySelector('.request-container .comment-container input[type=checkbox]'),
+    requestCommentSubmitButton = document.querySelector('.request-container .comment-container input[type=submit]');
+
+  if (requestMarkAsSolvedButton) {
+    requestMarkAsSolvedButton.addEventListener('click', function () {
+      requestMarkAsSolvedCheckbox.setAttribute('checked', true);
+      requestCommentSubmitButton.disabled = true;
+      this.setAttribute('data-disabled', true);
+      // Element.closest is not supported in IE11
+      closest(this, 'form').submit();
+    });
+  }
+
+  // Change Mark as solved text according to whether comment is filled
+  var requestCommentTextarea = document.querySelector('.request-container .comment-container textarea');
+
+  var usesWysiwyg = requestCommentTextarea && requestCommentTextarea.dataset.helper === 'wysiwyg';
+
+  function isEmptyPlaintext(s) {
+    return s.trim() === '';
+  }
+
+  function isEmptyHtml(xml) {
+    var doc = new DOMParser().parseFromString(`<_>${xml}</_>`, 'text/xml');
+    var img = doc.querySelector('img');
+    return img === null && isEmptyPlaintext(doc.children[0].textContent);
+  }
+
+  var isEmpty = usesWysiwyg ? isEmptyHtml : isEmptyPlaintext;
+
+  if (requestCommentTextarea) {
+    requestCommentTextarea.addEventListener('input', function () {
+      if (isEmpty(requestCommentTextarea.value)) {
+        if (requestMarkAsSolvedButton) {
+          requestMarkAsSolvedButton.innerText = requestMarkAsSolvedButton.getAttribute('data-solve-translation');
+        }
+        requestCommentSubmitButton.disabled = true;
+      } else {
+        if (requestMarkAsSolvedButton) {
+          requestMarkAsSolvedButton.innerText = requestMarkAsSolvedButton.getAttribute(
+            'data-solve-and-submit-translation'
+          );
+        }
+        requestCommentSubmitButton.disabled = false;
+      }
+    });
+  }
+
+  // Disable submit button if textarea is empty
+  if (requestCommentTextarea && isEmpty(requestCommentTextarea.value)) {
+    requestCommentSubmitButton.disabled = true;
+  }
+
+  // Submit requests filter form on status or organization change in the request list page
+  Array.prototype.forEach.call(
+    document.querySelectorAll('#request-status-select, #request-organization-select'),
+    function (el) {
+      el.addEventListener('change', function (e) {
+        e.stopPropagation();
+        // saveFocus();
+        closest(this, 'form').submit();
+      });
+    }
+  );
+
+  // Submit requests filter form on search in the request list page
+  var quickSearch = document.querySelector('#quick-search');
+  quickSearch &&
+    quickSearch.addEventListener('keyup', function (e) {
+      if (e.keyCode === ENTER) {
+        e.stopPropagation();
+        // saveFocus();
+        closest(this, 'form').submit();
+      }
+    });
+
+  function toggleNavigation(toggle, menu) {
+    var isExpanded = menu.getAttribute('aria-expanded') === 'true';
+    menu.setAttribute('aria-expanded', !isExpanded);
+    toggle.setAttribute('aria-expanded', !isExpanded);
+  }
+
+  function closeNavigation(toggle, menu) {
+    menu.setAttribute('aria-expanded', false);
+    toggle.setAttribute('aria-expanded', false);
+    toggle.focus();
+  }
+
+  var menuButton = document.querySelector('.header .menu-button-mobile');
+  var menuList = document.querySelector('#user-nav-mobile');
+
+  menuButton.addEventListener('click', function (e) {
+    e.stopPropagation();
+    toggleNavigation(this, menuList);
+  });
+
+  menuList.addEventListener('keyup', function (e) {
+    if (e.keyCode === ESCAPE) {
+      e.stopPropagation();
+      closeNavigation(menuButton, this);
+    }
+  });
+
+  // Toggles expanded aria to collapsible elements
+  var collapsible = document.querySelectorAll('.collapsible-nav, .collapsible-sidebar');
+
+  Array.prototype.forEach.call(collapsible, function (el) {
+    var toggle = el.querySelector('.collapsible-nav-toggle, .collapsible-sidebar-toggle');
+
+    el.addEventListener('click', function (e) {
+      toggleNavigation(toggle, this);
+    });
+
+    el.addEventListener('keyup', function (e) {
+      if (e.keyCode === ESCAPE) {
+        closeNavigation(toggle, this);
+      }
+    });
+  });
+
+  // Submit organization form in the request page
+  var requestOrganisationSelect = document.querySelector('#request-organization select');
+
+  if (requestOrganisationSelect) {
+    requestOrganisationSelect.addEventListener('change', function () {
+      closest(this, 'form').submit();
+    });
+  }
+
+  // If multibrand search has more than 5 help centers or categories collapse the list
+  var multibrandFilterLists = document.querySelectorAll('.multibrand-filter-list');
+  Array.prototype.forEach.call(multibrandFilterLists, function (filter) {
+    if (filter.children.length > 6) {
+      // Display the show more button
+      var trigger = filter.querySelector('.see-all-filters');
+      trigger.setAttribute('aria-hidden', false);
+
+      // Add event handler for click
+      trigger.addEventListener('click', function (e) {
+        e.stopPropagation();
+        trigger.parentNode.removeChild(trigger);
+        filter.classList.remove('multibrand-filter-list--collapsed');
+      });
+    }
+  });
+
+  // If there are any error notifications below an input field, focus that field
+  var notificationElm = document.querySelector('.notification-error');
+  if (
+    notificationElm &&
+    notificationElm.previousElementSibling &&
+    typeof notificationElm.previousElementSibling.focus === 'function'
+  ) {
+    notificationElm.previousElementSibling.focus();
+  }
+
+  // Dropdowns
+
+  function Dropdown(toggle, menu) {
+    this.toggle = toggle;
+    this.menu = menu;
+
+    this.menuPlacement = {
+      top: menu.classList.contains('dropdown-menu-top'),
+      end: menu.classList.contains('dropdown-menu-end'),
+    };
+
+    this.toggle.addEventListener('click', this.clickHandler.bind(this));
+    this.toggle.addEventListener('keydown', this.toggleKeyHandler.bind(this));
+    this.menu.addEventListener('keydown', this.menuKeyHandler.bind(this));
+  }
+
+  Dropdown.prototype = {
+    get isExpanded() {
+      return this.menu.getAttribute('aria-expanded') === 'true';
+    },
+
+    get menuItems() {
+      return Array.prototype.slice.call(this.menu.querySelectorAll("[role='menuitem']"));
+    },
+
+    dismiss: function () {
+      if (!this.isExpanded) return;
+
+      this.menu.setAttribute('aria-expanded', false);
+      this.menu.classList.remove('dropdown-menu-end', 'dropdown-menu-top');
+    },
+
+    open: function () {
+      if (this.isExpanded) return;
+
+      this.menu.setAttribute('aria-expanded', true);
+      this.handleOverflow();
+    },
+
+    handleOverflow: function () {
+      var rect = this.menu.getBoundingClientRect();
+
+      var overflow = {
+        right: rect.left < 0 || rect.left + rect.width > window.innerWidth,
+        bottom: rect.top < 0 || rect.top + rect.height > window.innerHeight,
+      };
+
+      if (overflow.right || this.menuPlacement.end) {
+        this.menu.classList.add('dropdown-menu-end');
+      }
+
+      if (overflow.bottom || this.menuPlacement.top) {
+        this.menu.classList.add('dropdown-menu-top');
+      }
+
+      if (this.menu.getBoundingClientRect().top < 0) {
+        this.menu.classList.remove('dropdown-menu-top');
+      }
+    },
+
+    focusNextMenuItem: function (currentItem) {
+      if (!this.menuItems.length) return;
+
+      var currentIndex = this.menuItems.indexOf(currentItem);
+      var nextIndex = currentIndex === this.menuItems.length - 1 || currentIndex < 0 ? 0 : currentIndex + 1;
+
+      this.menuItems[nextIndex].focus();
+    },
+
+    focusPreviousMenuItem: function (currentItem) {
+      if (!this.menuItems.length) return;
+
+      var currentIndex = this.menuItems.indexOf(currentItem);
+      var previousIndex = currentIndex <= 0 ? this.menuItems.length - 1 : currentIndex - 1;
+
+      this.menuItems[previousIndex].focus();
+    },
+
+    clickHandler: function () {
+      if (this.isExpanded) {
+        this.dismiss();
+      } else {
+        this.open();
+      }
+    },
+
+    toggleKeyHandler: function (e) {
+      switch (e.keyCode) {
+        case ENTER:
+        case SPACE:
+        case DOWN:
+          e.preventDefault();
+          this.open();
+          this.focusNextMenuItem();
+          break;
+        case UP:
+          e.preventDefault();
+          this.open();
+          this.focusPreviousMenuItem();
+          break;
+        case ESCAPE:
+          this.dismiss();
+          this.toggle.focus();
+          break;
+      }
+    },
+
+    menuKeyHandler: function (e) {
+      var firstItem = this.menuItems[0];
+      var lastItem = this.menuItems[this.menuItems.length - 1];
+      var currentElement = e.target;
+
+      switch (e.keyCode) {
+        case ESCAPE:
+          this.dismiss();
+          this.toggle.focus();
+          break;
+        case DOWN:
+          e.preventDefault();
+          this.focusNextMenuItem(currentElement);
+          break;
+        case UP:
+          e.preventDefault();
+          this.focusPreviousMenuItem(currentElement);
+          break;
+        case TAB:
+          if (e.shiftKey) {
+            if (currentElement === firstItem) {
+              this.dismiss();
+            } else {
+              e.preventDefault();
+              this.focusPreviousMenuItem(currentElement);
+            }
+          } else if (currentElement === lastItem) {
+            this.dismiss();
+          } else {
+            e.preventDefault();
+            this.focusNextMenuItem(currentElement);
+          }
+          break;
+        case ENTER:
+        case SPACE:
+          e.preventDefault();
+          currentElement.click();
+          break;
+      }
+    },
+  };
+
+  var dropdowns = [];
+  var dropdownToggles = Array.prototype.slice.call(document.querySelectorAll('.dropdown-toggle'));
+
+
+  dropdownToggles.forEach(function (toggle) {
+    var menu = toggle.nextElementSibling;
+    if (menu && menu.classList.contains('dropdown-menu')) {
+      dropdowns.push(new Dropdown(toggle, menu));
+    }
+  });
+
+  document.addEventListener('click', function (evt) {
+    dropdowns.forEach(function (dropdown) {
+      if (!dropdown.toggle.contains(evt.target)) {
+        dropdown.dismiss();
+      }
+    });
+  });
+});

@@ -1,0 +1,144 @@
+const hiddenPayloads = {
+  71659: {
+    key: "report-copyright",
+  },
+  360001202252: {
+    key: "public-profile-contact",
+  },
+  228863: {
+    key: "lag-feedback",
+  },
+  360000014503: {
+    key: "returns-exchanges",
+  },
+  134363: {
+    key: "twitter-general-support",
+  },
+  224203: {
+    key: "studio3d-support",
+  },
+  247803: {
+    key: "spec-2",
+  },
+  360001266791: {
+    key: "spotlight-payment-support",
+  },
+  360001234011: {
+    key: "materials-release-support",
+  },
+  360001052692: {
+    key: "snap-tokens-1",
+  },
+  101966: {
+    key: "spec-1",
+  },
+  360001156631: {
+    key: "creator-interest",
+  },
+  360000742991: {
+    key: "account-support",
+  },
+  360000999372: {
+    key: "global-partner-form",
+  },
+  360000106503: {
+    key: "snap-kit-contact",
+  },
+  211703: {
+    key: "general-support-form",
+  },
+  360000005946: {
+    key: "report-trademark",
+  },
+  4415382039828: {
+    key: "spotlight-content-takedown-appeal",
+  },
+  4415368384788: {
+    key: "content-takedown-appeal",
+  },
+  8642534448276: {
+    key: "account-recovery",
+  },
+  360000493672: {
+    key: "ts-all-abuse-1b",
+  },
+  360000016663: {
+    key: "information-privacy",
+  },
+  109463: {
+    key: "bugs-2",
+  },
+  360000723031: {
+    key: "ts-reported-content-3",
+  },
+  106993: {
+    key: "ts-all-abuse-1",
+  },
+  189026: {
+    key: "ts-reported-content-2",
+  },
+  360000025743: {
+    key: "bugs-2b",
+  },
+  225183: {
+    key: "ts-impersonation-1b",
+  },
+  76246: {
+    key: "feedback-1",
+  },
+  76586: {
+    key: "ar-2",
+  },
+  109363: {
+    key: "ar-2",
+  },
+  109383: {
+    key: "ts-report-a-geofilter",
+  },
+  107523: {
+    key: "ar-4",
+  },
+  109443: {
+    key: "bugs-1",
+  },
+  66056: {
+    key: "on-demand-geofilters",
+  },
+  8180087057300: {
+    key: "privacy-rights",
+  },
+  10492925245204: {
+    key: "partnerships-account-recovery",
+  },
+  11457592603924: {
+    key: "privacy-rights-appeal",
+  },
+  16872133077140: {
+    key: "snap-star-verification-request",
+  },
+  17470990658068: {
+    key: "hidden-form-1"
+  },
+  17471023300884: {
+    key: "hidden-form-2"
+  },
+  20182040055060: {
+    key: "hidden-form-3"
+  },
+  20182031649300: {
+    key: "hidden-form-4"
+  },
+  149423: {
+    key: "snapstreaks-restore"
+  },
+  19326996115732: {
+    key: "snap-star-support"
+  },
+  20269107174548: {
+    key: "twitter-esc"
+  }
+};
+
+function getHiddenFormPayload(form_id) {
+  return hiddenPayloads[form_id];
+}
